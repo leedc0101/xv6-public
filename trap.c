@@ -55,6 +55,16 @@ trap(struct trapframe *tf)
       release(&tickslock);
     }
     lapiceoi();
+    if(myproc() && (tf->cs & 3) == DPL_USER) {
+      myproc()->actual_runtime++;
+      myproc()->vruntime = myproc()->actual_runtime * (NICE_WEIGHTS[20] / myproc()->weight);
+
+      if(myproc()->actual_runtime >= calculate_time_slice(myproc())) {
+        myproc()->yield_flag = 1;
+      }
+    }
+    if(myproc() && myproc()->state == RUNNING && myproc()->yield_flag)
+      yield();
     break;
   case T_IRQ0 + IRQ_IDE:
     ideintr();

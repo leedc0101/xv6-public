@@ -7,6 +7,262 @@
 #include "proc.h"
 #include "spinlock.h"
 
+int total_runnable_weight = 0;
+
+
+void left_rotate(struct rbt_tree *tree, struct rbt_node *x) {
+    struct rbt_node *y = x->right;
+    x->right = y->left;
+    if (y->left != NULL) {
+        y->left->parent = x;
+    }
+    y->parent = x->parent;
+    if (x->parent == NULL) {
+        tree->root = y;
+    } else if (x == x->parent->left) {
+        x->parent->left = y;
+    } else {
+        x->parent->right = y;
+    }
+    y->left = x;
+    x->parent = y;
+}
+
+void right_rotate(struct rbt_tree *tree, struct rbt_node *y) {
+    struct rbt_node *x = y->left;
+    y->left = x->right;
+    if (x->right != NULL) {
+        x->right->parent = y;
+    }
+    x->parent = y->parent;
+    if (y->parent == NULL) {
+        tree->root = x;
+    } else if (y == y->parent->right) {
+        y->parent->right = x;
+    } else {
+        y->parent->left = x;
+    }
+    x->right = y;
+    y->parent = x;
+}
+
+void insert_fixup(struct rbt_tree *tree, struct rbt_node *z) {
+    while (z->parent && z->parent->color == RED) {
+        if (z->parent == z->parent->parent->left) {
+            struct rbt_node *y = z->parent->parent->right;
+            if (y && y->color == RED) {
+                z->parent->color = BLACK;
+                y->color = BLACK;
+                z->parent->parent->color = RED;
+                z = z->parent->parent;
+            } else {
+                if (z == z->parent->right) {
+                    z = z->parent;
+                    left_rotate(tree, z);
+                }
+                z->parent->color = BLACK;
+                z->parent->parent->color = RED;
+                right_rotate(tree, z->parent->parent);
+            }
+        } else {
+            // Symmetric to the above case, left and right swapped
+            struct rbt_node *y = z->parent->parent->left;
+            if (y && y->color == RED) {
+                z->parent->color = BLACK;
+                y->color = BLACK;
+                z->parent->parent->color = RED;
+                z = z->parent->parent;
+            } else {
+                if (z == z->parent->left) {
+                    z = z->parent;
+                    right_rotate(tree, z);
+                }
+                z->parent->color = BLACK;
+                z->parent->parent->color = RED;
+                left_rotate(tree, z->parent->parent);
+            }
+        }
+    }
+    tree->root->color = BLACK;
+}
+
+void insert_rbt(struct rbt_tree *tree, struct proc *p) {
+    struct rbt_node *z = (struct rbt_node *)kalloc(); // Assume kalloc() allocates kernel memory
+    z->proc = p;
+    struct rbt_node *y = NULL;
+    struct rbt_node *x = tree->root;
+
+    // Standard BST insertion
+    while (x != NULL) {
+        y = x;
+        if (p->vruntime < x->proc->vruntime) {
+            x = x->left;
+        } else {
+            x = x->right;
+        }
+    }
+    z->parent = y;
+    if (y == NULL) {
+        tree->root = z;
+    } else if (p->vruntime < y->proc->vruntime) {
+        y->left = z;
+    } else {
+        y->right = z;
+    }
+
+    // Set node properties and insert node into tree
+    z->left = NULL;
+    z->right = NULL;
+    z->color = RED;
+
+    // Fix RBT properties
+    insert_fixup(tree, z);
+}
+
+struct rbt_node* tree_minimum(struct rbt_node *x) {
+    while (x->left != NULL) {
+        x = x->left;
+    }
+    return x;
+}
+
+void delete_fixup(struct rbt_tree *tree, struct rbt_node *x) {
+    while (x != tree->root && x->color == BLACK) {
+        if (x == x->parent->left) {
+            struct rbt_node *w = x->parent->right;
+            if (w->color == RED) {
+                w->color = BLACK;
+                x->parent->color = RED;
+                left_rotate(tree, x->parent);
+                w = x->parent->right;
+            }
+            if (w->left->color == BLACK && w->right->color == BLACK) {
+                w->color = RED;
+                x = x->parent;
+            } else {
+                if (w->right->color == BLACK) {
+                    w->left->color = BLACK;
+                    w->color = RED;
+                    right_rotate(tree, w);
+                    w = x->parent->right;
+                }
+                w->color = x->parent->color;
+                x->parent->color = BLACK;
+                w->right->color = BLACK;
+                left_rotate(tree, x->parent);
+                x = tree->root;
+            }
+        } else {
+            // Symmetric to the above case, left and right swapped
+            struct rbt_node *w = x->parent->left;
+            if (w->color == RED) {
+                w->color = BLACK;
+                x->parent->color = RED;
+                right_rotate(tree, x->parent);
+                w = x->parent->left;
+            }
+            if (w->right->color == BLACK && w->right->color == BLACK) {
+                w->color = RED;
+                x = x->parent;
+            } else {
+                if (w->left->color == BLACK) {
+                    w->right->color = BLACK;
+                    w->color = RED;
+                    left_rotate(tree, w);
+                    w = x->parent->left;
+                }
+                w->color = x->parent->color;
+                x->parent->color = BLACK;
+                w->left->color = BLACK;
+                right_rotate(tree, x->parent);
+                x = tree->root;
+            }
+        }
+    }
+    x->color = BLACK;
+}
+
+void delete_rbt(struct rbt_tree *tree, struct proc *p) {
+    struct rbt_node *z = NULL;
+    struct rbt_node *x, *y;
+
+    // Find the node z in the tree that corresponds to process p
+    for (z = tree->root; z != NULL; z = (p->vruntime < z->proc->vruntime) ? z->left : z->right) {
+        if (z->proc == p) {
+            break;
+        }
+    }
+
+    if (!z || z->proc != p) {
+        return; // Process not found in the tree
+    }
+
+    if (z->left == NULL || z->right == NULL) {
+        y = z;
+    } else {
+        y = tree_minimum(z->right);
+    }
+
+    if (y->left != NULL) {
+        x = y->left;
+    } else {
+        x = y->right;
+    }
+
+    if (x != NULL) {
+        x->parent = y->parent;
+    }
+
+    if (y->parent == NULL) {
+        tree->root = x;
+    } else if (y == y->parent->left) {
+        y->parent->left = x;
+    } else {
+        y->parent->right = x;
+    }
+
+    if (y != z) {
+        z->proc = y->proc;
+    }
+
+    if (y->color == BLACK) {
+        delete_fixup(tree, x);
+    }
+
+    kfree((char*)y);
+}
+
+struct proc* find_min_vruntime(struct rbt_tree *tree) {
+    struct rbt_node *x = tree->root;
+    if (!x) {
+        return NULL; // Tree is empty
+    }
+
+    // Traverse to the leftmost node
+    while (x->left != NULL) {
+        x = x->left;
+    }
+
+    // Return the process with minimum vruntime
+    return x->proc;
+}
+
+struct proc* find_next_vruntime(struct rbt_tree *tree, int vruntime) {
+    struct rbt_node *x = tree->root;
+    struct rbt_node *next = NULL;
+
+    while (x != NULL) {
+        if (x->proc->vruntime > vruntime) {
+            next = x;
+            x = x->left;
+        } else {
+            x = x->right;
+        }
+    }
+
+    return next ? next->proc : NULL;
+}
+
 int NICE_WEIGHTS[40] = {
 /*  0 */   88761,  71755,  56483,  46273,  36291,
 /*  5 */   29154,  23254,  18705,  14949,  11916,
@@ -24,12 +280,50 @@ struct {
 } ptable;
 
 static struct proc *initproc;
+struct rbt_tree rbt_tree;
 
 int nextpid = 1;
 extern void forkret(void);
 extern void trapret(void);
 
+int min_vruntime(void) {
+  struct proc *p;
+  int min_vr = 0x7FFFFFFF;
+
+  acquire(&ptable.lock);
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    if(p->state == RUNNABLE && p->vruntime < min_vr) {
+      min_vr = p->vruntime;
+    }
+  }
+  release(&ptable.lock);
+
+  if(min_vr == 0x7FFFFFFF) {
+    return 0;
+  } else {
+    return min_vr;
+  }
+}
+
+void update_total_runnable_weight(struct proc *p, int old_state) {
+  acquire(&ptable.lock);
+  if (old_state != RUNNABLE && p->state == RUNNABLE) {
+    total_runnable_weight += p->weight;
+  } else if (old_state == RUNNABLE && p->state != RUNNABLE) {
+    total_runnable_weight -= p->weight;
+  }
+  release(&ptable.lock);
+}
+
+int calculate_time_slice(struct proc *p) {
+  acquire(&ptable.lock);
+  int time_slice = (total_runnable_weight == 0) ? 10 : (10 * p->weight) / total_runnable_weight;
+  release(&ptable.lock);
+  return time_slice;
+}
+
 static void wakeup1(void *chan);
+
 
 void
 pinit(void)
@@ -100,7 +394,10 @@ found:
   p->state = EMBRYO;
   p->pid = nextpid++;
 
-  np->nice = DEFAULT_NICE;
+  p->nice = DEFAULT_NICE;
+  p->vruntime = 0;
+  p->actual_runtime = 0;
+  p->weight = NICE_WEIGHTS[20];
 
   release(&ptable.lock);
 
@@ -227,7 +524,11 @@ fork(void)
 
   acquire(&ptable.lock);
 
+  insert_rbt(&rbt_tree, np);
+
   np->state = RUNNABLE;
+  update_total_runnable_weight(np, UNUSED);
+  np->vruntime = curproc->vruntime;
 
   release(&ptable.lock);
 
@@ -274,8 +575,12 @@ exit(void)
     }
   }
 
+  delete_rbt(&rbt_tree, curproc);
+
   // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
+  update_total_runnable_weight(myproc(), RUNNING);
+
   sched();
   panic("zombie exit");
 }
@@ -345,11 +650,17 @@ scheduler(void)
 
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
-        continue;
 
-      // Switch to chosen process.  It is the process's job
+     p = find_min_vruntime(&rbt_tree);
+
+    while(p != NULL) {
+      if(p->state != RUNNABLE) {
+        // Process is not runnable, find the next process in the RBT
+        p = find_next_vruntime(&rbt_tree, p->vruntime);
+        continue;
+      }
+
+      // Switch to chosen process. It is the process's job
       // to release ptable.lock and then reacquire it
       // before jumping back to us.
       c->proc = p;
@@ -362,7 +673,18 @@ scheduler(void)
       // Process is done running for now.
       // It should have changed its p->state before coming back.
       c->proc = 0;
+
+      if(p->yield_flag) {
+        // Move to the next process in the red-black tree
+        p = find_next_vruntime(&rbt_tree, p->vruntime);
+        p->yield_flag = 0;
+      } else {
+        // If the process hasn't yielded, break the loop and
+        // let it continue running.
+        break;
+      }
     }
+    
     release(&ptable.lock);
 
   }
@@ -400,6 +722,7 @@ yield(void)
 {
   acquire(&ptable.lock);  //DOC: yieldlock
   myproc()->state = RUNNABLE;
+  update_total_runnable_weight(myproc(), RUNNING);
   sched();
   release(&ptable.lock);
 }
@@ -473,8 +796,13 @@ wakeup1(void *chan)
   struct proc *p;
 
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
-    if(p->state == SLEEPING && p->chan == chan)
+    if(p->state == SLEEPING && p->chan == chan) {
       p->state = RUNNABLE;
+      update_total_runnable_weight(myproc(), SLEEPING);
+
+      int vruntime_1tick = (1 * NICE_WEIGHTS[20]) / p->weight;
+      p->vruntime = min_vruntime() - vruntime_1tick;
+    }
 }
 
 // Wake up all processes sleeping on chan.

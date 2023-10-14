@@ -53,6 +53,7 @@ struct proc {
   int vruntime;                // virtual runtime
   int actual_runtime;          // actual runtime
   int weight;                  // weight based on nice value
+  int yield_flag;              // flag to check if process has yielded
 };
 
 // Process memory is laid out contiguously, low addresses first:
@@ -66,3 +67,22 @@ struct proc {
 #define DEFAULT_NICE 20
 
 extern int NICE_WEIGHTS[40];
+
+int calculate_time_slice(struct proc *p);
+
+
+enum RBTColor { RED, BLACK };
+
+struct rbt_node {
+  struct proc *proc; // Pointer to the process
+  struct rbt_node *left, *right, *parent;
+  enum RBTColor color;
+};
+
+struct rbt_tree {
+  struct rbt_node *root;
+};
+
+void insert_rbt(struct rbt_tree *tree, struct proc *p);
+struct proc* find_min_vruntime(struct rbt_tree *tree);
+void delete_rbt(struct rbt_tree *tree, struct proc *p);
