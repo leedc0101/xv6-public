@@ -49,6 +49,10 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  int nice;                    // Nice value, default 20
+  int vruntime;                // virtual runtime
+  int actual_runtime;          // actual runtime
+  int weight;                  // weight based on nice value
 };
 
 // Process memory is laid out contiguously, low addresses first:
@@ -56,3 +60,9 @@ struct proc {
 //   original data and bss
 //   fixed-size stack
 //   expandable heap
+
+#define MAX_NICE 39
+#define MIN_NICE 0
+#define DEFAULT_NICE 20
+
+extern int NICE_WEIGHTS[40];

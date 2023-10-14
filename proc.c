@@ -7,6 +7,17 @@
 #include "proc.h"
 #include "spinlock.h"
 
+int NICE_WEIGHTS[40] = {
+/*  0 */   88761,  71755,  56483,  46273,  36291,
+/*  5 */   29154,  23254,  18705,  14949,  11916,
+/* 10 */   9548,   7620,   6100,   4904,   3906,
+/* 15 */   3121,   2501,   1991,   1586,   1277,
+/* 20 */   1024,   820,    655,    526,    423,
+/* 25 */   335,    272,    215,    172,    137,
+/* 30 */   110,    87,     70,     56,     45,
+/* 35 */   36,     29,     23,     18,     15
+};
+
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
@@ -88,6 +99,8 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
+
+  np->nice = DEFAULT_NICE;
 
   release(&ptable.lock);
 
@@ -531,4 +544,113 @@ procdump(void)
     }
     cprintf("\n");
   }
+}
+
+
+int
+getpname(int pid)
+{
+  struct proc *p;
+
+  acquire(&ptable.lock);
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    if(p -> pid == pid) {
+      cprintf("%s\n", p->name);
+      release(&ptable.lock);
+      return 0;
+    }
+  }
+  release(&ptable.lock);
+  return -1;
+}
+
+int
+getnice(int pid)
+{
+  struct proc *p;
+  int nice_value = -1;
+
+  acquire(&ptable.lock);
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    if(p -> pid == pid) {
+      nice_value = p->nice;
+      break;
+    }
+  }
+
+  release(&ptable.lock);
+  return nice_value;
+}
+
+int
+setnice(int pid, int value)
+{
+  struct proc *p;
+
+  if(value < MIN_NICE || value > MAX_NICE) {
+    return -1;
+  }
+
+  acquire(&ptable.lock);
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    if(p -> pid == pid) {
+      p->nice = value;
+      release(&ptable.lock);
+      
+      return 0;
+    }
+  }
+
+  release(&ptable.lock);
+  return -1;
+}
+
+void
+ps(int pid)
+{
+  struct proc *p;
+  struct proc proc_array[NPROC] = {0};
+
+  char* procstate_strings[] = {
+    "UNUSED",
+    "EMBRYO",
+    "SLEEPING",
+    "RUNNABLE",
+    "RUNNING",
+    "ZOMBIE"
+  };
+
+  int proc_found = 0;
+
+  acquire(&ptable.lock);
+
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    if(p->pid == pid || pid == 0) {
+      if(p->state == UNUSED) {
+        continue;
+      }
+
+      proc_array[p->pid].pid = p->pid;
+      proc_array[p->pid].state = p->state;
+      proc_array[p->pid].nice = p->nice;
+      safestrcpy(proc_array[p->pid].name, p->name, sizeof(p->name));
+
+      proc_found = 1;
+    }
+  }
+
+  release(&ptable.lock);
+
+  
+  if(proc_found) {
+    cprintf("name\tpid\t\tstate\t\tpriority\n");
+
+    for(p = proc_array; p < &proc_array[NPROC]; p++) {
+      if(p->pid != 0)   {
+        cprintf("%s\t%d\t\t%s\t\t%d\n", p->name, p->pid, procstate_strings[p->state], p->nice);
+      }
+    }
+  }
+
+  return;
 }
