@@ -66,3 +66,4 @@ struct proc {
 #define DEFAULT_NICE 20
 
 extern int NICE_WEIGHTS[40];
+

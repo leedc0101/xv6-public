@@ -7,6 +7,7 @@
 #include "proc.h"
 #include "spinlock.h"
 
+
 int NICE_WEIGHTS[40] = {
 /*  0 */   88761,  71755,  56483,  46273,  36291,
 /*  5 */   29154,  23254,  18705,  14949,  11916,
@@ -100,7 +101,7 @@ found:
   p->state = EMBRYO;
   p->pid = nextpid++;
 
-  np->nice = DEFAULT_NICE;
+  p->nice = DEFAULT_NICE;
 
   release(&ptable.lock);
 
